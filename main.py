@@ -1,63 +1,70 @@
-from src.send_request import login_dvwa, send_payload
-from src.ga_engine import setup_ga
+# main_moga.py
+from src.send_request import login_dvwa
+from src.ga_engine import setup_ga, component_render
 from src.fitness import evaluate
+from src.seed_loader import load_seed_pools
 import random
+from deap import tools
 
+# ---------------------------
+# CONFIG
+# ---------------------------
+POP = 50
+GEN = 30
 
 if __name__ == "__main__":
-    # === LOGIN FIRST ===
-    login_dvwa()
-    print("[+] Logged into DVWA")
+    login_dvwa(security_level="impossible")
+    print("[+] Logged in.")
 
-    # === TARGET URL & PARAM KEY ===
     url = "http://localhost/dvwa/vulnerabilities/xss_r/"
     param = "name"
 
-    # === GA Setup ===
-    toolbox = setup_ga()
-    population = toolbox.population(n=10)  # population size
+    pools = load_seed_pools("payload_base/xss_seed.txt")
+    tag_pool, event_pool, js_pool = pools["tags"], pools["events"], pools["js"]
 
-    # === Initial fitness evaluation ===
-    fitnesses = [evaluate(ind, url, param) for ind in population]
-    for ind, fit in zip(population, fitnesses):
+    toolbox = setup_ga(tag_pool, event_pool, js_pool)
+
+    # initial population
+    pop = toolbox.population(n=POP)
+
+    # assign fitness
+    fitness = [evaluate(ind, url, param) for ind in pop]
+    for ind, fit in zip(pop, fitness):
         ind.fitness.values = fit
 
-    # === GA Evo loop ===
-    NGEN = 5  # number of generations
-    print("[+] Starting Genetic Algorithm...\n")
+    print("[+] Starting NSGA-II evolution...\n")
 
-    for gen in range(NGEN):
-        # Selection + clone
-        offspring = toolbox.select(population, len(population))
+    for gen in range(GEN):
+        offspring = tools.selNSGA2(pop, len(pop))
         offspring = list(map(toolbox.clone, offspring))
 
-        # Crossover
+        # crossover + mutation
         for c1, c2 in zip(offspring[::2], offspring[1::2]):
-            if random.random() < 0.5:
-                toolbox.mate(c1, c2)
-                del c1.fitness.values
-                del c2.fitness.values
+            toolbox.mate(c1, c2)
+            del c1.fitness.values
+            del c2.fitness.values
 
-        # Mutation
-        for mutant in offspring:
-            if random.random() < 0.2:
-                toolbox.mutate(mutant)
-                del mutant.fitness.values
+        for mut in offspring:
+            toolbox.mutate(mut)
+            del mut.fitness.values
 
-        # Re-evaluate fitness for new individuals
-        invalid_ind = [ind for ind in offspring if not ind.fitness.valid]
-        fitnesses = [evaluate(ind, url, param) for ind in invalid_ind]
-
-        for ind, fit in zip(invalid_ind, fitnesses):
+        # evaluate invalid fitnesses
+        invalid = [ind for ind in offspring if not ind.fitness.valid]
+        for ind, fit in zip(invalid, [evaluate(i, url, param) for i in invalid]):
             ind.fitness.values = fit
 
-        population[:] = offspring
+        pop = offspring
 
-        # Print best of generation
-        best_fitness = max(ind.fitness.values[0] for ind in population)
-        print(f"Generation {gen} best fitness = {best_fitness}")
+        print(f"Gen {gen}:")
+        print("  top survivability:", max(ind.fitness.values[0] for ind in pop))
+        print("  top structure:", max(ind.fitness.values[1] for ind in pop))
 
-    # === FINAL BEST PAYLOAD ===
-    best = max(population, key=lambda ind: ind.fitness.values[0])
-    print("\n=== FINAL RESULT ===")
-    print("Best payload found:", "".join(best))
+    # extract Pareto Front
+    pareto = tools.sortNondominated(pop, k=len(pop), first_front_only=True)[0]
+
+    print("\n=== FINAL PARETO FRONT ===")
+    for ind in pareto:
+        print("Payload:", component_render(ind))
+        print("Survivability:", ind.fitness.values[0])
+        print("Structure:", ind.fitness.values[1])
+        print()

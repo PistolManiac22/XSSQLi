@@ -3,8 +3,10 @@ from bs4 import BeautifulSoup
 
 session = requests.Session()
 
-def login_dvwa():
+def login_dvwa(security_level="medium"):
     login_url = "http://localhost/dvwa/login.php"
+
+    # Get login page (to retrieve user_token)
     login_page = session.get(login_url)
     soup = BeautifulSoup(login_page.text, "lxml")
 
@@ -17,7 +19,14 @@ def login_dvwa():
         "user_token": token
     }
 
+    # Log in
     session.post(login_url, data=payload)
+
+    # Set the DVWA security level cookie
+    session.cookies.set("security", security_level, domain="localhost", path="/")
+
+    print(f"[+] DVWA security set to: {security_level}")
+
 
 
 def send_payload(url, param, payload):
