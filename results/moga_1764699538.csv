@@ -1,0 +1,2 @@
+payload,survivability,structure,executed
+"<img src=x onload=""console.log/*x*/(1)console.log(1)"">",0.4259514888582134,17.0,1.0

