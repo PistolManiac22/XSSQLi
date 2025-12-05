@@ -61,7 +61,7 @@ class GAXSS_CLI:
         # Auto-discover parameters if requested
         if args.auto_discover:
             self.logger.info("Auto-discovering vulnerable parameters...")
-            discoverer = ParameterDiscoverer(session)
+            discoverer = ParameterDiscoverer(webapp_config)
             injectable_params = discoverer.find_injectable_parameters(args.url)
             
             if not injectable_params:
@@ -186,6 +186,7 @@ Examples (Custom Web App):
         app_type = app_group.add_mutually_exclusive_group(required=True)
         app_type.add_argument('--generic', action='store_true', help='Generic web app (no auth)')
         app_type.add_argument('--dvwa', action='store_true', help='DVWA (Damn Vulnerable Web App)')
+        app_type.add_argument('--bwapp', action='store_true', help='bWAPP (Buggy Web Application)')
         app_type.add_argument('--custom-url', type=str, help='Custom web app (provide base URL)')
         
         # DVWA-specific options
@@ -194,6 +195,13 @@ Examples (Custom Web App):
         dvwa_group.add_argument('--password', default='password', help='DVWA password (default: password)')
         dvwa_group.add_argument('--security', default='low', choices=['low', 'medium', 'high', 'impossible'],
                                help='DVWA security level (default: low)')
+        
+        # bWAPP-specific options
+        bwapp_group = xss_parser.add_argument_group('bWAPP Options')
+        bwapp_group.add_argument('--bwapp-user', default='bee', help='bWAPP username (default: bee)')
+        bwapp_group.add_argument('--bwapp-pass', default='bug', help='bWAPP password (default: bug)')
+        bwapp_group.add_argument('--vulnerability', default='xss_reflected', 
+                                help='bWAPP vulnerability (default: xss_reflected)')
         
         # GA options
         ga_group = xss_parser.add_argument_group('Genetic Algorithm Options')
@@ -219,10 +227,9 @@ Examples (Custom Web App):
                 self.logger.info("Using Generic Web App configuration")
             
             elif args.dvwa:
-                from dvwa_test import DVWAConfig
-                # NEW (handles ports correctly)
+                from dvwa_config import DVWAConfig
                 base_url_match = re.match(r'(https?://[^/]+)', args.url)
-                base_url = base_url_match.group(1) if base_url_match else "http://localhost"
+                base_url = base_url_match.group(1) if base_url_match else "http://localhost:8082"
                 
                 webapp_config = DVWAConfig(
                     base_url=base_url,
@@ -231,13 +238,27 @@ Examples (Custom Web App):
                     security_level=args.security
                 )
                 self.logger.info(f"Using DVWA configuration at {base_url}")
+                
+            elif args.bwapp:
+                from bwapp_config import BWAPPConfig
+                base_url_match = re.match(r'(https?://[^/]+)', args.url)
+                base_url = base_url_match.group(1) if base_url_match else "http://localhost:8082"
+                
+                webapp_config = BWAPPConfig(
+                    base_url=base_url,
+                    username=args.bwapp_user,
+                    password=args.bwapp_pass,
+                    vulnerability=args.vulnerability,
+                    security_level=args.security
+                )
+                self.logger.info(f"Using bWAPP configuration at {base_url}")
             
             elif args.custom_url:
                 webapp_config = GenericWebApp(base_url=args.custom_url)
                 self.logger.info(f"Using Generic Web App configuration at {args.custom_url}")
             
             else:
-                self.logger.error("Must specify --generic, --dvwa, or --custom-url")
+                self.logger.error("Must specify --generic, --dvwa, --bwapp, or --custom-url")
                 parser.print_help()
                 return
             
