@@ -1,172 +1,164 @@
 """
-GAXSS Fitness Calculator (Optimized v2)
-Better execution detection for DVWA
+GAXSS Fitness Calculator (Generic)
+Adapts to detected web app behavior
 """
 
 import re
 from typing import Tuple
+import urllib.parse
+import base64
+import logging
+
+logger = logging.getLogger('FitnessCalculator')
 
 
 class GAXSS_FitnessCalculator:
-    """Calculate fitness score for XSS payloads (optimized)."""
+    """Calculate fitness score - web app agnostic."""
+
+    def __init__(self, behaviors: dict = None):
+        """
+        Args:
+            behaviors: Dict of detected app behaviors from BehaviorAnalyzer
+        """
+        self.behaviors = behaviors or {}
 
     @staticmethod
-    def levenshtein_distance_fast(s1: str, s2: str, max_len: int = 500) -> int:
-        """Fast Levenshtein distance on truncated strings."""
-        if len(s1) > max_len:
-            s1 = s1[:max_len]
-        if len(s2) > max_len:
-            pos = s2.find(s1[:50]) if len(s1) > 50 else 0
-            if pos > 0:
-                start = max(0, pos - 200)
-                end = min(len(s2), pos + 300)
-                s2 = s2[start:end]
-            else:
-                s2 = s2[:max_len]
-
-        if len(s1) < len(s2):
-            return GAXSS_FitnessCalculator.levenshtein_distance_fast(s2, s1, max_len)
-
-        if len(s2) == 0:
-            return len(s1)
-
-        previous_row = range(len(s2) + 1)
-        for i, c1 in enumerate(s1):
-            current_row = [i + 1]
-            for j, c2 in enumerate(s2):
-                insertions = previous_row[j + 1] + 1
-                deletions = current_row[j] + 1
-                substitutions = previous_row[j] + (c1 != c2)
-                current_row.append(min(insertions, deletions, substitutions))
-            previous_row = current_row
-
-        return previous_row[-1]
-
-    @staticmethod
-    def calculate_ex(output: str) -> float:
-        """Calculate execution score Ex(I,O)."""
-        execution_indicators = [
-            (r'<\w+[^>]*on\w+\s*=', 1.0),
-            (r'<script[^>]*>', 0.9),
-            (r'<img[^>]*onerror', 0.9),
-            (r'<svg[^>]*on\w+', 0.9),
-            (r'<body[^>]*on\w+', 0.9),
-            (r'<iframe[^>]*on\w+', 0.9),
-            (r'javascript:', 0.8),
-            (r'alert\s*\(', 0.85),
-            (r'console\.log\s*\(', 0.8),
-            (r'fetch\s*\(', 0.8),
-            (r'XMLHttpRequest', 0.7),
-            (r'document\.location', 0.7),
-        ]
+    def payload_is_xss_vector(payload: str) -> bool:
+        """Check if payload is a valid XSS vector (has tags and events)."""
+        has_tag = re.search(r'<\w+', payload, re.IGNORECASE)
+        has_event = re.search(r'on\w+\s*=', payload, re.IGNORECASE)
+        has_script = re.search(r'<script', payload, re.IGNORECASE)
         
-        max_score = 0.0
-        for pattern, score in execution_indicators:
-            if re.search(pattern, output, re.IGNORECASE):
-                max_score = max(max_score, score)
-        
-        return max_score
+        return bool(has_tag or has_script) and bool(has_event or has_script)
 
-    @staticmethod
-    def calculate_closed(input_payload: str, output: str) -> float:
-        """Calculate closure score CLOSED(I,O)."""
-        c1 = 0
-        c2 = 0
+    def detect_encoding(self, payload: str, response: str) -> str:
+        """Detect how payload appears in response."""
         
-        brackets = [
-            ('<', '>'),
-            ('{', '}'),
-            ('(', ')'),
-            ('[', ']'),
-            ('"', '"'),
-        ]
-
-        for open_char, close_char in brackets:
-            open_count = input_payload.count(open_char)
-            close_count = output.count(close_char)
-            c1 += open_count
-            c2 += close_count
-
-        if c1 == 0:
-            return 1.0
-
-        ratio = (c1 - c2) / (c1 + 0.001)
-        return max(0.0, min(1.0, ratio))
-
-    @staticmethod
-    def calculate_dis(input_payload: str, output: str) -> float:
-        """Calculate similarity/distance score Dis(I,O)."""
-        if input_payload in output:
-            return 1.0
+        # [1] Plain
+        if payload in response:
+            return 'plain'
         
-        key_parts = ['<', '>', '=', 'on', 'alert', 'script']
-        found_parts = sum(1 for part in key_parts if part in output.lower())
-        if found_parts >= 4:
-            return 0.8
-        elif found_parts >= 2:
-            return 0.6
+        # [2] URL encoded
+        try:
+            url_encoded = urllib.parse.quote(payload, safe='')
+            if url_encoded in response:
+                return 'url_encoded'
+        except:
+            pass
         
-        payload_parts = input_payload.split()
-        if len(payload_parts) > 0:
-            first_part = payload_parts[0][:20]
-            if first_part in output:
-                return 0.7
-        
-        encoded = (
-            input_payload.replace('<', '&lt;')
-                         .replace('>', '&gt;')
-                         .replace('"', '&quot;')
+        # [3] HTML encoded
+        html_encoded = (
+            payload.replace('<', '&lt;')
+                   .replace('>', '&gt;')
+                   .replace('"', '&quot;')
+                   .replace("'", '&#x27;')
         )
-        if encoded in output:
+        if html_encoded in response:
+            return 'html_encoded'
+        
+        # [4] Base64
+        try:
+            base64_encoded = base64.b64encode(payload.encode()).decode()
+            if base64_encoded in response:
+                return 'base64'
+        except:
+            pass
+        
+        # [5] Not found
+        return 'not_found'
+
+    def calculate_ex(self, output: str, input_payload: str = "") -> float:
+        """Calculate execution score."""
+        encoding = self.detect_encoding(input_payload, output)
+        
+        # Only executable if plain or URL encoded (app decodes it)
+        if encoding not in ['plain', 'url_encoded']:
+            return 0.0
+        
+        # Must be valid XSS vector
+        if not self.payload_is_xss_vector(input_payload):
+            return 0.0
+        
+        # Check for execution indicators in response
+        indicators = [
+            r'<\w+[^>]*on\w+\s*=',
+            r'<script[^>]*>',
+            r'javascript:',
+            r'alert\s*\(',
+            r'fetch\s*\(',
+            r'XMLHttpRequest',
+            r'document\.write',
+            r'document\.location',
+        ]
+        
+        found = sum(1 for pattern in indicators if re.search(pattern, output, re.IGNORECASE))
+        
+        if found >= 2:
+            return 1.0
+        elif found >= 1:
+            return 0.7
+        else:
             return 0.3
+
+    def calculate_closed(self, input_payload: str, output: str) -> float:
+        """Calculate closure score."""
+        encoding = self.detect_encoding(input_payload, output)
         
-        distance = GAXSS_FitnessCalculator.levenshtein_distance_fast(
-            input_payload, 
-            output, 
-            max_len=300
-        )
-        max_len = min(len(input_payload), len(output), 300)
+        if encoding not in ['plain', 'url_encoded']:
+            return 0.0
         
-        if max_len == 0:
-            return 0.1
+        if not self.payload_is_xss_vector(input_payload):
+            return 0.0
         
-        normalized_distance = distance / max(max_len, 1)
-        similarity = 1.0 / (1.0 + normalized_distance * 2)
-        return max(0.1, similarity)
+        # Count brackets
+        open_br = input_payload.count('<')
+        close_br = input_payload.count('>')
+        
+        if open_br == 0:
+            return 1.0
+        
+        diff = abs(open_br - close_br)
+        return max(0.0, 1.0 - (diff * 0.5))
 
-    @staticmethod
-    def calculate_pu(output: str, input_payload: str = "", payload_type: str = 'xss') -> float:
-        """Calculate penalty score Pu(I,O)."""
-        penalty = 0.0
+    def calculate_dis(self, input_payload: str, output: str) -> float:
+        """Calculate distance/similarity score."""
+        encoding = self.detect_encoding(input_payload, output)
+        
+        score_map = {
+            'plain': 1.0,
+            'url_encoded': 0.9,
+            'html_encoded': 0.1,
+            'base64': 0.0,
+            'not_found': 0.0,
+        }
+        
+        return score_map.get(encoding, 0.0)
 
-        if payload_type == 'xss':
-            if input_payload and input_payload not in output:
-                if len(input_payload) > 10:
-                    if input_payload[:10] not in output:
-                        penalty += 0.4
-            
-            if '&lt;' in output or '&gt;' in output or '&quot;' in output:
-                penalty += 0.3
-            
-            if '<script' not in output.lower() and 'script' in input_payload.lower():
-                penalty += 0.2
-            
-            if 'on' in input_payload.lower() and not re.search(r'on\w+=', output, re.IGNORECASE):
-                penalty += 0.2
+    def calculate_pu(self, output: str, input_payload: str = "") -> float:
+        """Calculate penalty score."""
+        encoding = self.detect_encoding(input_payload, output)
+        
+        penalty_map = {
+            'plain': 0.0,
+            'url_encoded': 0.1,
+            'html_encoded': 0.9,
+            'base64': 1.0,
+            'not_found': 1.0,
+        }
+        
+        return penalty_map.get(encoding, 1.0)
 
-        return min(1.0, penalty)
-
-    @staticmethod
     def calculate_fitness(
+        self,
         input_payload: str,
         output: str,
         payload_type: str = 'xss'
     ) -> Tuple[float, float, float, float, float]:
         """Calculate complete fitness score."""
-        ex = GAXSS_FitnessCalculator.calculate_ex(output)
-        closed = GAXSS_FitnessCalculator.calculate_closed(input_payload, output)
-        dis = GAXSS_FitnessCalculator.calculate_dis(input_payload, output)
-        pu = GAXSS_FitnessCalculator.calculate_pu(output, input_payload, payload_type)
+        ex = self.calculate_ex(output, input_payload)
+        closed = self.calculate_closed(input_payload, output)
+        dis = self.calculate_dis(input_payload, output)
+        pu = self.calculate_pu(output, input_payload)
 
         fitness = ex * closed * dis * (1.0 - pu)
 

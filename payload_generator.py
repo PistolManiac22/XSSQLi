@@ -1,5 +1,5 @@
 """
-GAXSS Payload Generator
+GAXSS Payload Generator (Generic)
 Generates context-aware XSS payloads based on DNA encoding
 """
 
@@ -43,14 +43,43 @@ class GAXSS_PayloadGenerator:
     def __init__(self):
         self.library = PayloadComponentLibrary()
 
+    def is_well_formed(self, payload: str) -> bool:
+        """Check if payload is syntactically valid."""
+        open_brackets = payload.count('<')
+        close_brackets = payload.count('>')
+        
+        if abs(open_brackets - close_brackets) > 1:
+            return False
+        
+        double_quotes = payload.count('"')
+        single_quotes = payload.count("'")
+        
+        if double_quotes % 2 != 0:
+            return False
+        if single_quotes % 2 != 0:
+            return False
+        
+        if '""' in payload or "''" in payload:
+            return False
+        
+        return True
+
+    def apply_safe_mutations(self, payload: str, dna: GAXSS_DNA) -> str:
+        """Apply mutations while maintaining payload validity."""
+        for mutation_idx in dna.mutations:
+            mutated = GAXSS_Mutations.apply_mutation(payload, mutation_idx)
+            
+            if self.is_well_formed(mutated):
+                payload = mutated
+        
+        return payload
+
     def generate_payload_type1(self, dna: GAXSS_DNA) -> str:
         """Generate Type 1 payload: Between <script> tags."""
         js_code = self.library.JS_CODE[dna.main[2] % len(self.library.JS_CODE)]
         payload = f";{js_code}//"
 
-        for mutation_idx in dna.mutations:
-            payload = GAXSS_Mutations.apply_mutation(payload, mutation_idx)
-
+        payload = self.apply_safe_mutations(payload, dna)
         return payload
 
     def generate_payload_type2(self, dna: GAXSS_DNA) -> str:
@@ -61,9 +90,7 @@ class GAXSS_PayloadGenerator:
 
         payload = f'{closing} {event}="{js_code}" x="'
 
-        for mutation_idx in dna.mutations:
-            payload = GAXSS_Mutations.apply_mutation(payload, mutation_idx)
-
+        payload = self.apply_safe_mutations(payload, dna)
         return payload
 
     def generate_payload_type3(self, dna: GAXSS_DNA) -> str:
@@ -74,9 +101,7 @@ class GAXSS_PayloadGenerator:
 
         payload = f'<{tag} {event}="{js_code}">'
 
-        for mutation_idx in dna.mutations:
-            payload = GAXSS_Mutations.apply_mutation(payload, mutation_idx)
-
+        payload = self.apply_safe_mutations(payload, dna)
         return payload
 
     def generate_payload(self, dna: GAXSS_DNA, context: Optional[int] = None) -> str:

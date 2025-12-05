@@ -1,5 +1,5 @@
 """
-GAXSS Genetic Algorithm Engine
+GAXSS Genetic Algorithm Engine (Generic)
 Main GA loop with population management, selection, crossover, mutation
 """
 
@@ -16,7 +16,8 @@ class GAXSS_Engine:
 
     def __init__(self, population_size: int = 60, generations: int = 30,
                  crossover_prob: float = 0.7, mutation_prob: float = 0.5,
-                 tournament_size: int = 3, elite_size: int = 2, patience: int = 10):
+                 tournament_size: int = 3, elite_size: int = 2, patience: int = 10,
+                 behaviors: dict = None):
         self.population_size = population_size
         self.generations = generations
         self.crossover_prob = crossover_prob
@@ -24,9 +25,10 @@ class GAXSS_Engine:
         self.tournament_size = tournament_size
         self.elite_size = elite_size
         self.patience = patience
+        self.behaviors = behaviors or {}
 
         self.payload_generator = GAXSS_PayloadGenerator()
-        self.fitness_calc = GAXSS_FitnessCalculator()
+        self.fitness_calc = GAXSS_FitnessCalculator(behaviors=behaviors)
 
         self.logger = logging.getLogger('GAXSS_Engine')
         self.population = []
@@ -57,7 +59,9 @@ class GAXSS_Engine:
             try:
                 payload = self.payload_generator.generate_payload(dna, context)
                 response = test_func(payload)
-                fitness, ex, closed, dis, pu = self.fitness_calc.calculate_fitness(payload, response, 'xss')
+                fitness, ex, closed, dis, pu = self.fitness_calc.calculate_fitness(
+                    payload, response, 'xss'
+                )
                 fitness_data.append((fitness, ex, closed, dis, pu))
             except Exception as e:
                 self.logger.warning(f"Error evaluating DNA: {e}")
