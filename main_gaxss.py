@@ -220,9 +220,9 @@ Examples (Custom Web App):
             
             elif args.dvwa:
                 from dvwa_test import DVWAConfig
-                # Extract base URL from target URL
-                base_url_match = re.match(r'(https?://[^/]+/[^/]+)', args.url)
-                base_url = base_url_match.group(1) if base_url_match else "http://localhost/dvwa"
+                # NEW (handles ports correctly)
+                base_url_match = re.match(r'(https?://[^/]+)', args.url)
+                base_url = base_url_match.group(1) if base_url_match else "http://localhost"
                 
                 webapp_config = DVWAConfig(
                     base_url=base_url,
