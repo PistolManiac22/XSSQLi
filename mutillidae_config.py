@@ -61,7 +61,7 @@ class MutillidaeConfig(GenericWebApp):
         # Verify the level was set
         verify_response = self.session.get(f"{self.base_url}/index.php")
         if f"SL{level}" in verify_response.text or f"Security Level: {level}" in verify_response.text:
-            self.logger.info(f"✓ Verified: Security Level is now {level}")
+            self.logger.info(f"[OK] Verified: Security Level is now {level}")
         else:
             self.logger.warning(f"⚠ Could not verify Security Level {level}. Check logs.")
 

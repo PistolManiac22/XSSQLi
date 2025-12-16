@@ -7,6 +7,7 @@ from abc import ABC, abstractmethod
 import requests
 import logging
 from typing import Optional, List, Dict
+from bs4 import BeautifulSoup
 
 class WebAppConfig(ABC):
     """Abstract base class for web application configurations."""
@@ -56,12 +57,55 @@ class GenericWebApp(WebAppConfig):
         return self.session
 
     def send_payload(self, url: str, param: str, payload: str) -> str:
+        """Hybrid approach: pattern detection + form analysis fallback."""
         try:
-            params = {param: payload}
-            # Merge with any global params defined (though Generic has none by default)
-            params.update(self.get_global_params())
-            response = self.session.get(url, params=params, timeout=10)
-            return response.text
+            data = {param: payload}
+            data.update(self.get_global_params())
+            
+            # 1️⃣ Pattern detection dulu (cepat)
+            if "sqli" in url.lower():
+                method = "POST"
+            elif "xss_reflected" in url.lower() or "xss_r" in url.lower():
+                method = "GET"
+            else:
+                # 2️⃣ Fallback ke form analysis
+                method = self._detect_form_method(url, param)
+            
+            # 3️⃣ Kirim dengan method yang sesuai
+            if method == "POST":
+                data["Submit"] = "Submit"
+                resp = self.session.post(url, data=data, timeout=10, allow_redirects=True)
+            else:
+                resp = self.session.get(url, params=data, timeout=10)
+            
+            return resp.text
         except Exception as e:
             self.logger.warning(f"Error sending payload: {e}")
             return ""
+
+    def _detect_form_method(self, url: str, param: str) -> str:
+        """Cache form method detection."""
+        if not hasattr(self, '_method_cache'):
+            self._method_cache = {}
+        
+        if url in self._method_cache:
+            return self._method_cache[url]
+        
+        try:
+            resp = self.session.get(url, timeout=10)
+            soup = BeautifulSoup(resp.text, 'html.parser')
+            
+            for form in soup.find_all('form'):
+                for inp in form.find_all(['input', 'textarea']):
+                    if inp.get('name') == param:
+                        method = form.get('method', 'POST').upper()
+                        self._method_cache[url] = method
+                        self.logger.info(f"Form method: {method}")
+                        return method
+            
+            # Default
+            self._method_cache[url] = "POST"
+            return "POST"
+        except:
+            return "POST"
+
