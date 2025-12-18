@@ -76,7 +76,7 @@ class DVWAConfig(WebAppConfig):
     def send_payload(self, url: str, param: str, payload: str) -> str:
         """Send payload via GET request (DVWA XSS Reflected uses GET)."""
         try:
-            params = {param: payload}
+            params = {param: payload, "Submit": "Submit"}
             response = self.session.get(url, params=params, timeout=10)
             return response.text
         except Exception as e:
