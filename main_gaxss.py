@@ -3,7 +3,7 @@ GAXSS Main CLI Interface - WITH SQLi MODE
 Works with any web application via configuration classes
 Includes both XSS and SQLi vulnerability testing
 
-UPDATED VERSION with SQLi support integrated
+UPDATED VERSION with SQLi support integrated (DVWA, bWAPP, Mutillidae, Generic)
 """
 
 import argparse
@@ -26,7 +26,6 @@ class GAXSS_CLI:
     """Command-line interface for GAXSS (Generic) with XSS and SQLi modes."""
 
     def __init__(self, output_dir: str = "results", log_dir: str = "logs"):
-        """Initialize CLI with output directories."""
         self.output_dir = output_dir
         self.log_dir = log_dir
         os.makedirs(output_dir, exist_ok=True)
@@ -35,7 +34,6 @@ class GAXSS_CLI:
         self.logger = logging.getLogger("GAXSS")
 
     def setup_logging(self):
-        """Setup comprehensive logging configuration."""
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         log_file = os.path.join(self.log_dir, f"gaxss_{timestamp}.log")
 
@@ -393,14 +391,14 @@ class GAXSS_CLI:
         param_name = stats.get("param_name", "?")
         method = stats.get("method", "?")
 
-        if best_fitness >= 0.9:
+        if best_fitness >= 0.7:
             self.logger.warning("=" * 70)
             self.logger.warning("[!] SQL INJECTION VULNERABILITY DETECTED - CRITICAL")
             self.logger.warning("=" * 70)
             self.logger.warning(f"Parameter: {param_name} (method={method})")
             self.logger.warning(f"Best fitness: {best_fitness:.4f}")
             self.logger.warning(f"Successful payload: {stats['best_individual']}")
-        elif best_fitness >= 0.5:
+        elif best_fitness >= 0.3:
             self.logger.warning("=" * 70)
             self.logger.warning("[!] SQL INJECTION VULNERABILITY DETECTED - HIGH")
             self.logger.warning("=" * 70)
@@ -513,7 +511,8 @@ class GAXSS_CLI:
                 f.write(f"Generations Analyzed: {stats['total_generations']}\n\n")
 
                 f.write(
-                    f"Tested Parameter: {stats.get('param_name', '?')} (method={stats.get('method', '?')})\n\n"
+                    f"Tested Parameter: {stats.get('param_name', '?')} "
+                    f"(method={stats.get('method', '?')})\n\n"
                 )
 
                 f.write("BEST PAYLOAD:\n")
@@ -554,34 +553,6 @@ class GAXSS_CLI:
         parser = argparse.ArgumentParser(
             description="GAXSS - Genetic Algorithm XSS/SQLi Testing Tool (Generic)",
             formatter_class=argparse.RawDescriptionHelpFormatter,
-            epilog="""
-EXAMPLES:
-
-XSS Testing:
-  Generic Web App:
-    python main_gaxss.py xss -u "http://example.com/search" -p "q" --generic
-    python main_gaxss.py xss -u "http://example.com/search" --generic --auto-discover
-
-  DVWA:
-    python main_gaxss.py xss -u "http://localhost/dvwa/vulnerabilities/xss_r/" -p "name" --dvwa
-    python main_gaxss.py xss --dvwa --auto-discover --security low
-
-SQL Injection Testing:
-  DVWA SQLi Low Security:
-    python main_gaxss.py sqli -u "http://localhost/dvwa/vulnerabilities/sqli/" -p "id" --dvwa --security low
-
-  DVWA SQLi Auto-Discover:
-    python main_gaxss.py sqli -u "http://localhost/dvwa/vulnerabilities/sqli/" --dvwa --auto-discover
-
-  Generic Target:
-    python main_gaxss.py sqli -u "http://example.com/search" -p "q" --generic
-
-  Custom Target:
-    python main_gaxss.py sqli -u "http://vulnerable.app/api/search" -p "keyword" --custom-url "http://vulnerable.app"
-
-  With GA Tuning:
-    python main_gaxss.py sqli -u "http://localhost/dvwa/vulnerabilities/sqli/" -p "id" --dvwa --pop 50 --gen 25
-            """,
         )
 
         subparsers = parser.add_subparsers(dest="mode", help="Testing mode")
@@ -611,7 +582,9 @@ SQL Injection Testing:
         app_type.add_argument("--generic", action="store_true", help="Generic web app")
         app_type.add_argument("--dvwa", action="store_true", help="DVWA")
         app_type.add_argument("--bwapp", action="store_true", help="bWAPP")
-        app_type.add_argument("--mutillidae", action="store_true", help="OWASP Mutillidae II")
+        app_type.add_argument(
+            "--mutillidae", action="store_true", help="OWASP Mutillidae II"
+        )
         app_type.add_argument("--custom-url", type=str, help="Custom web app base URL")
 
         dvwa_group = xss_parser.add_argument_group("DVWA Options")
@@ -678,6 +651,9 @@ SQL Injection Testing:
         )
         app_type_sqli.add_argument("--dvwa", action="store_true", help="DVWA")
         app_type_sqli.add_argument("--bwapp", action="store_true", help="bWAPP")
+        app_type_sqli.add_argument(
+            "--mutillidae", action="store_true", help="OWASP Mutillidae II"
+        )
         app_type_sqli.add_argument(
             "--custom-url", type=str, help="Custom base URL"
         )
@@ -828,11 +804,27 @@ SQL Injection Testing:
                         security_level=args.security,
                         vulnerability="sqli",
                     )
+                elif args.mutillidae:
+                    from mutillidae_config import MutillidaeConfig
+
+                    base_url = self._extract_base_url(
+                        args.url, default="http://127.0.0.1:9000"
+                    )
+                    # sama mapping seperti XSS
+                    if args.security == "low":
+                        security_level = "0"
+                    elif args.security == "medium":
+                        security_level = "1"
+                    else:
+                        security_level = "2"
+                    webapp_config = MutillidaeConfig(
+                        base_url=base_url, security_level=security_level
+                    )
                 elif args.custom_url:
                     webapp_config = GenericWebApp(base_url=args.custom_url)
                 else:
                     self.logger.error(
-                        "Must specify: --generic, --dvwa, --bwapp, or --custom-url"
+                        "Must specify: --generic, --dvwa, --bwapp, --mutillidae, or --custom-url"
                     )
                     return
 

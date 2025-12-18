@@ -48,16 +48,22 @@ class ColumnDetector:
         # DVWAConfig / object dengan base_url
         if hasattr(self.app_config, "base_url"):
             base = self.app_config.base_url.rstrip("/")
-            # DVWA
-            if self.app_config.__class__.__name__ == "DVWAConfig":
+            cls_name = self.app_config.__class__.__name__
+            # DVWA SQLi
+            if cls_name == "DVWAConfig":
                 return f"{base}/vulnerabilities/sqli/"
             # bWAPP SQLi
-            if self.app_config.__class__.__name__ == "BWAPPConfig":
+            if cls_name == "BWAPPConfig":
                 return f"{base}/sqli_1.php"
+            # Mutillidae
+            if cls_name == "MutillidaeConfig":
+                return f"{base}/index.php?page=user-info.php"
             return base
+        
         # Dict config lama
         if isinstance(self.app_config, dict):
             return self.app_config.get("url", "")
+        
         # Fallback
         return ""
 
