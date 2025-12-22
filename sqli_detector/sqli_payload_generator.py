@@ -235,7 +235,7 @@ if __name__ == "__main__":
         valid = gen.validate_payload(payload)
         injection = gen.injection_types[dna['injection_type']]
         
-        status = "✓" if valid else "✗"
+        status = "[OK]" if valid else "✗"
         print(f"{status} [{i+1:2d}] {injection:15} → {payload}")
     
     # ========== TEST 2: Verify BUG #1 is fixed ==========
@@ -252,7 +252,7 @@ if __name__ == "__main__":
             errors += 1
     
     if errors == 0:
-        print("✓ NO EMPTY STRINGS FOUND (Bug #1 FIXED!)")
+        print("[OK] NO EMPTY STRINGS FOUND (Bug #1 FIXED!)")
     else:
         print(f"✗ Found {errors} empty string errors")
     
@@ -272,7 +272,7 @@ if __name__ == "__main__":
     print(f"Column count: {col_count} (expected: 2)")
     
     if col_count == 2:
-        print("✓ COLUMN COUNT CORRECT (Bug #2 FIXED!)")
+        print("[OK] COLUMN COUNT CORRECT (Bug #2 FIXED!)")
     else:
         print(f"✗ Column count mismatch: got {col_count}, expected 2")
     

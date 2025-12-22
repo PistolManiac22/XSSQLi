@@ -70,7 +70,7 @@ class GAXSS_PayloadGenerator:
             try:
                 from parameter_context_analyzer import ParameterContextAnalyzer
                 self.context_analyzer = ParameterContextAnalyzer(test_func, param_name)
-                logger.info(f"✓ Context analyzer initialized for param '{param_name}'")
+                logger.info(f"[OK] Context analyzer initialized for param '{param_name}'")
             except Exception as e:
                 logger.warning(f"Could not initialize context analyzer: {e}")
         

@@ -4,6 +4,7 @@ Works with any web application via configuration classes
 Includes both XSS and SQLi vulnerability testing
 
 UPDATED VERSION with SQLi support integrated (DVWA, bWAPP, Mutillidae, Generic)
+MODIFIED: SQLi export now uses CSV format (not TXT)
 """
 
 import argparse
@@ -241,7 +242,7 @@ class GAXSS_CLI:
             )
         else:
             self.logger.info("=" * 70)
-            self.logger.info("[✓] TIDAK TERDETEKSI KERENTANAN XSS")
+            self.logger.info("[[OK]] TIDAK TERDETEKSI KERENTANAN XSS")
             self.logger.info("=" * 70)
 
         self.logger.info("=" * 70)
@@ -285,7 +286,6 @@ class GAXSS_CLI:
 
                 self.logger.info(f"[OK] Discovered parameters: {parameters}")
 
-                # simpan mapping param -> method di config
                 if not hasattr(webapp_config, "param_methods"):
                     webapp_config.param_methods = {}
 
@@ -347,6 +347,8 @@ class GAXSS_CLI:
                 stats = engine.get_statistics()
                 stats["param_name"] = param_name
                 stats["method"] = method
+                stats["population"] = population
+                stats["fitness_data"] = fitness_history
                 all_stats.append(stats)
 
                 self.logger.info(
@@ -371,7 +373,9 @@ class GAXSS_CLI:
         # STEP 4: EXPORT RESULTS
         try:
             self.logger.info("Step 4: Exporting results...")
-            self.export_sqli_results(stats, args.output)
+            population = stats.get("population", [])
+            fitness_data = stats.get("fitness_data", [])
+            self.export_sqli_results(stats, population, fitness_data, args.output)
             self.logger.info("[OK] Results exported")
         except Exception as e:
             self.logger.error(f"[ERROR] Export error: {e}")
@@ -419,7 +423,11 @@ class GAXSS_CLI:
     # ==================== EXPORTERS ====================
 
     def export_xss_results(
-        self, results: List[Tuple], output_dir: str, context: int = 2
+        self,
+        results: List[Tuple],
+        output_dir: str,
+        context: int = 2,
+        ground_truth: str = "VULNERABLE",
     ):
         """Export XSS results to CSV file."""
         os.makedirs(output_dir, exist_ok=True)
@@ -442,9 +450,8 @@ class GAXSS_CLI:
                         "Dis",
                         "Pu",
                         "Risk_Level",
-                        "DNA_Closing",
-                        "DNA_Main",
-                        "DNA_Mutations",
+                        "Predicted",
+                        "GroundTruth",
                     ]
                 )
 
@@ -461,6 +468,9 @@ class GAXSS_CLI:
                         else:
                             risk_level = "LOW"
 
+                        predicted = (
+                            "VULNERABLE" if risk_level in ["CRITICAL", "HIGH"] else "SAFE"
+                        )
                         payload = payload_generator.generate_payload(
                             dna, context=context
                         )
@@ -476,9 +486,8 @@ class GAXSS_CLI:
                                 f"{dis:.4f}",
                                 f"{pu:.4f}",
                                 risk_level,
-                                str(dna.closing),
-                                str(dna.main),
-                                str(dna.mutations),
+                                predicted,
+                                ground_truth,
                             ]
                         )
                     except Exception as e:
@@ -492,56 +501,88 @@ class GAXSS_CLI:
             self.logger.error(f"Failed to export results: {e}")
             raise
 
-    def export_sqli_results(self, stats: dict, output_dir: str):
-        """Export SQLi results to text file."""
+    def export_sqli_results(
+        self,
+        stats: dict,
+        population: list,
+        fitness_data: list,
+        output_dir: str,
+        ground_truth: str = "VULNERABLE",
+    ):
+        """Export SQLi results to CSV file (XSS-like, with real payload strings)."""
         os.makedirs(output_dir, exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        result_file = os.path.join(output_dir, f"sqli_results_{timestamp}.txt")
+        csv_file = os.path.join(output_dir, f"sqli_results_{timestamp}.csv")
 
         try:
-            with open(result_file, "w", encoding="utf-8") as f:
-                f.write("=" * 70 + "\n")
-                f.write("GAXSS SQLi TESTING RESULTS\n")
-                f.write("=" * 70 + "\n\n")
+            results = list(zip(population, fitness_data))
+            results.sort(key=lambda x: x[1], reverse=True)
 
-                f.write(
-                    f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+            from sqli_detector.sqli_payload_generator import SQLiPayloadGenerator
+            # if your module is under sqli_detector, use:
+            # from sqli_detector.sqli_payload_generator import SQLiPayloadGenerator
+
+            sqli_gen = SQLiPayloadGenerator(column_count=2)
+
+            with open(csv_file, "w", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+
+                writer.writerow(
+                    [
+                        "Rank",
+                        "Fitness",
+                        "Payload",
+                        "Risk_Level",
+                        "GroundTruth",
+                        "Predicted",
+                        "Param_Name",
+                        "Method",
+                    ]
                 )
-                f.write(f"Best Fitness: {stats['best_fitness']:.4f}\n")
-                f.write(f"Generations Analyzed: {stats['total_generations']}\n\n")
 
-                f.write(
-                    f"Tested Parameter: {stats.get('param_name', '?')} "
-                    f"(method={stats.get('method', '?')})\n\n"
-                )
+                param_name = stats.get("param_name", "?")
+                method = stats.get("method", "?")
 
-                f.write("BEST PAYLOAD:\n")
-                f.write("-" * 70 + "\n")
-                if stats["best_individual"]:
-                    f.write(f"{stats['best_individual']}\n")
-                else:
-                    f.write("(No successful payload found)\n")
-                f.write("\n")
+                for rank, (dna, fitness) in enumerate(results, 1):
+                    try:
+                        if fitness >= 0.7:
+                            risk_level = "CRITICAL"
+                        elif fitness >= 0.3:
+                            risk_level = "HIGH"
+                        elif fitness >= 0.1:
+                            risk_level = "MEDIUM"
+                        else:
+                            risk_level = "LOW"
 
-                f.write("FITNESS PROGRESSION:\n")
-                f.write("-" * 70 + "\n")
-                for gen, fitness in enumerate(stats["best_fitness_per_gen"], 1):
-                    f.write(f"Gen {gen:3d}: {fitness:.4f}\n")
-                f.write("\n")
+                        predicted = "VULNERABLE" if fitness >= 0.3 else "SAFE"
 
-                f.write("ASSESSMENT:\n")
-                f.write("-" * 70 + "\n")
-                if stats["best_fitness"] >= 0.9:
-                    f.write("Status: CRITICAL - SQL Injection Confirmed\n")
-                    f.write("Risk Level: Critical\n")
-                elif stats["best_fitness"] >= 0.5:
-                    f.write("Status: HIGH - Likely SQL Injection\n")
-                    f.write("Risk Level: High\n")
-                else:
-                    f.write("Status: Low/No SQLi Detected\n")
-                    f.write("Risk Level: Low\n")
+                        try:
+                            sql_payload = sqli_gen.dna_to_payload(dna)
+                        except Exception as e:
+                            self.logger.debug(f"Error generating SQLi payload: {e}")
+                            sql_payload = str(dna)
 
-            self.logger.info(f"Results exported to {result_file}")
+                        payload_escaped = str(sql_payload).replace('"', '""')
+
+                        writer.writerow(
+                            [
+                                rank,
+                                f"{fitness:.4f}",
+                                f'"{payload_escaped}"',
+                                risk_level,
+                                ground_truth,
+                                predicted,
+                                param_name,
+                                method,
+                            ]
+                        )
+                    except Exception as e:
+                        self.logger.warning(f"Error exporting rank {rank}: {e}")
+                        continue
+
+            self.logger.info(
+                f"Results exported to {csv_file} ({len(results)} payloads)"
+            )
         except Exception as e:
             self.logger.error(f"Failed to export results: {e}")
             raise
@@ -675,10 +716,73 @@ class GAXSS_CLI:
         ga_group_sqli = sqli_parser.add_argument_group(
             "Genetic Algorithm Configuration"
         )
-        ga_group_sqli.add_argument("--pop", type=int, default=40, help="Population size")
-        ga_group_sqli.add_argument("--gen", type=int, default=20, help="Generations")
+        ga_group_sqli.add_argument(
+            "--pop", type=int, default=40, help="Population size"
+        )
+        ga_group_sqli.add_argument(
+            "--gen", type=int, default=20, help="Generations"
+        )
 
         sqli_parser.add_argument(
+            "-o", "--output", default="results", help="Output directory"
+        )
+
+        # BOTH MODE
+        both_parser = subparsers.add_parser(
+            "both", help="Run both XSS and SQLi testing"
+        )
+
+        both_parser.add_argument(
+            "-u", "--url", required=True, help="Target URL with vulnerable parameter"
+        )
+        both_parser.add_argument(
+            "-p",
+            "--param",
+            help="Parameter name (required if --auto-discover not used)",
+        )
+        both_parser.add_argument(
+            "--auto-discover",
+            action="store_true",
+            help="Automatically discover vulnerable parameters",
+        )
+
+        app_group_both = both_parser.add_argument_group("Web Application Type")
+        app_type_both = app_group_both.add_mutually_exclusive_group(required=True)
+
+        app_type_both.add_argument("--generic", action="store_true", help="Generic web app")
+        app_type_both.add_argument("--dvwa", action="store_true", help="DVWA")
+        app_type_both.add_argument("--bwapp", action="store_true", help="bWAPP")
+        app_type_both.add_argument(
+            "--mutillidae", action="store_true", help="OWASP Mutillidae II"
+        )
+        app_type_both.add_argument(
+            "--custom-url", type=str, help="Custom base URL"
+        )
+
+        both_parser.add_argument(
+            "--username", default="admin", help="DVWA username (if applicable)"
+        )
+        both_parser.add_argument(
+            "--password", default="password", help="DVWA password (if applicable)"
+        )
+        both_parser.add_argument(
+            "--security",
+            default="low",
+            choices=["low", "medium", "high", "impossible"],
+            help="Security level",
+        )
+
+        ga_group_both = both_parser.add_argument_group(
+            "Genetic Algorithm Configuration"
+        )
+        ga_group_both.add_argument(
+            "--pop", type=int, default=60, help="Population size for both scans"
+        )
+        ga_group_both.add_argument(
+            "--gen", type=int, default=30, help="Generations for both scans"
+        )
+
+        both_parser.add_argument(
             "-o", "--output", default="results", help="Output directory"
         )
 
@@ -696,6 +800,8 @@ class GAXSS_CLI:
                     args.url = "http://127.0.0.1:8081/vulnerabilities/xss_r/"
                 elif getattr(args, "bwapp", False):
                     args.url = "http://127.0.0.1:8082/xss_get.php"
+                elif getattr(args, "mutillidae", False):
+                    args.url = "http://localhost:9000/index.php?page=user-info.php"
 
             if (args.generic or args.custom_url) and not args.url:
                 self.logger.error("Error: untuk generic/custom, -u/--url wajib diisi")
@@ -810,7 +916,6 @@ class GAXSS_CLI:
                     base_url = self._extract_base_url(
                         args.url, default="http://127.0.0.1:9000"
                     )
-                    # sama mapping seperti XSS
                     if args.security == "low":
                         security_level = "0"
                     elif args.security == "medium":
@@ -830,6 +935,79 @@ class GAXSS_CLI:
 
                 success = self.run_sqli_test(args, webapp_config)
                 sys.exit(0 if success else 1)
+            except ImportError as e:
+                self.logger.error(f"Configuration module not found: {e}")
+                return
+            except Exception as e:
+                self.logger.error(f"Error: {e}")
+                import traceback
+
+                self.logger.error(traceback.format_exc())
+                sys.exit(1)
+
+        elif args.mode == "both":
+            if not args.auto_discover and not args.param:
+                self.logger.error(
+                    "Error: Either -p/--param or --auto-discover required"
+                )
+                both_parser.print_help()
+                return
+
+            try:
+                if args.generic:
+                    webapp_config = GenericWebApp(base_url="")
+                elif args.dvwa:
+                    from dvwa_config import DVWAConfig
+
+                    base_url = self._extract_base_url(args.url)
+                    webapp_config = DVWAConfig(
+                        base_url=base_url,
+                        username=args.username,
+                        password=args.password,
+                        security_level=args.security,
+                    )
+                elif args.bwapp:
+                    from bwapp_config import BWAPPConfig
+
+                    base_url = self._extract_base_url(
+                        args.url, default="http://localhost:8082"
+                    )
+                    webapp_config = BWAPPConfig(
+                        base_url=base_url,
+                        security_level=args.security,
+                        vulnerability="sqli",
+                    )
+                elif args.mutillidae:
+                    from mutillidae_config import MutillidaeConfig
+
+                    base_url = self._extract_base_url(
+                        args.url, default="http://127.0.0.1:9000"
+                    )
+                    if args.security == "low":
+                        security_level = "0"
+                    elif args.security == "medium":
+                        security_level = "1"
+                    else:
+                        security_level = "2"
+                    webapp_config = MutillidaeConfig(
+                        base_url=base_url, security_level=security_level
+                    )
+                elif args.custom_url:
+                    webapp_config = GenericWebApp(base_url=args.custom_url)
+                else:
+                    self.logger.error(
+                        "Must specify: --generic, --dvwa, --bwapp, --mutillidae, or --custom-url"
+                    )
+                    return
+
+                self.logger.info("=== Running XSS scan (BOTH mode) ===")
+                success_xss = self.run_xss_test(args, webapp_config)
+
+                self.logger.info("=== Running SQLi scan (BOTH mode) ===")
+                success_sqli = self.run_sqli_test(args, webapp_config)
+
+                sys.exit(0 if (success_xss and success_sqli) else 1)
+
             except ImportError as e:
                 self.logger.error(f"Configuration module not found: {e}")
                 return

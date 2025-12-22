@@ -17,9 +17,9 @@ class ColumnDetector:
         Binary search untuk menemukan jumlah kolom
 
         Teknik: ORDER BY n
-        - ORDER BY 1 ✓
-        - ORDER BY 2 ✓
-        - ORDER BY 3 ✓
+        - ORDER BY 1 [OK]
+        - ORDER BY 2 [OK]
+        - ORDER BY 3 [OK]
         - ORDER BY 4 ✗ (error)
         → 3 columns
         """

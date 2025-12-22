@@ -79,7 +79,7 @@ class ParameterContextAnalyzer:
             
             # If more opens than closes, we're inside <script>
             if script_open_count > script_close_count:
-                logger.info(f"✓ Detected BETWEEN_SCRIPT context (script tags: open={script_open_count}, close={script_close_count})")
+                logger.info(f"[OK] Detected BETWEEN_SCRIPT context (script tags: open={script_open_count}, close={script_close_count})")
                 self.detected_context = InjectionContext.BETWEEN_SCRIPT
                 return InjectionContext.BETWEEN_SCRIPT
             
@@ -92,26 +92,26 @@ class ParameterContextAnalyzer:
             # Pattern 1: Inside double quotes
             if re.search(r'[a-z_-]+\s*=\s*"[^"]*$', before_marker_context, re.IGNORECASE) and \
                re.search(r'^[^"]*"', after_marker_context):
-                logger.info(f"✓ Detected INSIDE_HTML_TAG context (inside double quotes)")
+                logger.info(f"[OK] Detected INSIDE_HTML_TAG context (inside double quotes)")
                 self.detected_context = InjectionContext.INSIDE_HTML_TAG
                 return InjectionContext.INSIDE_HTML_TAG
             
             # Pattern 2: Inside single quotes
             if re.search(r"[a-z_-]+\s*=\s*'[^']*$", before_marker_context, re.IGNORECASE) and \
                re.search(r"^[^']*'", after_marker_context):
-                logger.info(f"✓ Detected INSIDE_HTML_TAG context (inside single quotes)")
+                logger.info(f"[OK] Detected INSIDE_HTML_TAG context (inside single quotes)")
                 self.detected_context = InjectionContext.INSIDE_HTML_TAG
                 return InjectionContext.INSIDE_HTML_TAG
             
             # Pattern 3: Inside unquoted attribute (space or > or / after marker)
             if re.search(r'[a-z_-]+\s*=\s*[^\s>"\']*$', before_marker_context, re.IGNORECASE) and \
                re.search(r'^[^\s>"\']*[\s>/]', after_marker_context):
-                logger.info(f"✓ Detected INSIDE_HTML_TAG context (inside unquoted attribute)")
+                logger.info(f"[OK] Detected INSIDE_HTML_TAG context (inside unquoted attribute)")
                 self.detected_context = InjectionContext.INSIDE_HTML_TAG
                 return InjectionContext.INSIDE_HTML_TAG
             
             # --- Default: OUTSIDE_TAG ---
-            logger.info(f"✓ Detected OUTSIDE_TAG context (not in script or attribute)")
+            logger.info(f"[OK] Detected OUTSIDE_TAG context (not in script or attribute)")
             self.detected_context = InjectionContext.OUTSIDE_TAG
             return InjectionContext.OUTSIDE_TAG
             
