@@ -250,6 +250,42 @@ class GAXSS_CLI:
 
     # ==================== SQLi WORKFLOW ====================
 
+    def _compute_sqli_ground_truth(self, webapp_config) -> str:
+        """
+        Ground truth for SQLi mode:
+        - DVWA: medium, high => SAFE
+        - bWAPP: high        => SAFE
+        - Mutillidae: high   => SAFE
+        else: VULNERABLE.
+        """
+        cls_name = webapp_config.__class__.__name__.lower()
+
+        # DVWA: uses string "low"/"medium"/"high"/"impossible"
+        if "dvwa" in cls_name:
+            level = getattr(webapp_config, "security_level", "low")
+            level_str = str(level).lower()
+            if level_str in ("medium", "high"):
+                return "SAFE"
+            return "VULNERABLE"
+        
+        if "bwapp" in cls_name:
+            # bWAPP stores the original text level in security_level_text ("LOW"/"MEDIUM"/"HIGH"/...)
+            level_text = getattr(webapp_config, "security_level_text", "LOW")
+            if str(level_text).upper() == "HIGH" or str(level_text).upper() == "MEDIUM":
+                return "SAFE"
+            return "VULNERABLE"
+
+        # Mutillidae: in this CLI, security_level is "0", "1", "2"
+        if "mutillidae" in cls_name:
+            level = getattr(webapp_config, "security_level", "0")
+            # "2" corresponds to high
+            if str(level) == "2":
+                return "SAFE"
+            return "VULNERABLE"
+
+        # Generic/custom: keep as vulnerable by default
+        return "VULNERABLE"
+
     def run_sqli_test(self, args, webapp_config):
         """Run SQLi vulnerability detection workflow."""
         self.logger.info("=" * 70)
@@ -375,7 +411,8 @@ class GAXSS_CLI:
             self.logger.info("Step 4: Exporting results...")
             population = stats.get("population", [])
             fitness_data = stats.get("fitness_data", [])
-            self.export_sqli_results(stats, population, fitness_data, args.output)
+            ground_truth = self._compute_sqli_ground_truth(webapp_config)
+            self.export_sqli_results(stats, population, fitness_data, args.output, ground_truth=ground_truth)
             self.logger.info("[OK] Results exported")
         except Exception as e:
             self.logger.error(f"[ERROR] Export error: {e}")
