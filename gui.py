@@ -18,6 +18,7 @@ import re
 from datetime import datetime
 from PIL import Image, ImageDraw, ImageTk
 import io
+import webbrowser
 
 
 # Import GAXSS CLI
@@ -139,17 +140,22 @@ class ModernResultsFrame(ttk_boot.Frame):
         # Calculate metrics
         risk_counts = {
             "CRITICAL": sum(1 for r in rows if r.get("Risk_Level", "").strip().upper() == "CRITICAL"),
-            "HIGH":     sum(1 for r in rows if r.get("Risk_Level", "").strip().upper() == "HIGH"),
-            "MEDIUM":   sum(1 for r in rows if r.get("Risk_Level", "").strip().upper() == "MEDIUM"),
-            "LOW":      sum(1 for r in rows if r.get("Risk_Level", "").strip().upper() == "LOW"),
+            "HIGH": sum(1 for r in rows if r.get("Risk_Level", "").strip().upper() == "HIGH"),
+            "MEDIUM": sum(1 for r in rows if r.get("Risk_Level", "").strip().upper() == "MEDIUM"),
+            "LOW": sum(1 for r in rows if r.get("Risk_Level", "").strip().upper() == "LOW"),
         }
 
         is_vulnerable = risk_counts["CRITICAL"] > 0 or risk_counts["HIGH"] > 0
+
         status_text = "VULNERABLE" if is_vulnerable else "SECURE"
         status_icon = "☠️" if is_vulnerable else "🟢"
         status_color = "#dc3545" if is_vulnerable else "#28a745"
 
         best_row = max(rows, key=lambda x: float(x.get("Fitness", 0)))
+
+        # Clear previous content
+        for child in self.content_frame.winfo_children():
+            child.destroy()
 
         # Header Section with Mode Badge (full width, less side padding)
         header_container = ttk_boot.Frame(self.content_frame)
@@ -160,7 +166,7 @@ class ModernResultsFrame(ttk_boot.Frame):
 
         ttk_boot.Label(
             mode_badge,
-            text=f"  {mode.upper()} SCAN  ",
+            text=f" {mode.upper()} SCAN ",
             font=("Segoe UI", 10, "bold"),
             bootstyle="inverse-primary",
             background="#007bff",
@@ -193,7 +199,7 @@ class ModernResultsFrame(ttk_boot.Frame):
             status_content,
             width=icon_size,
             height=icon_size,
-            bg=status_color,          # same as parent to blend
+            bg=status_color,  # same as parent to blend
             highlightthickness=0
         )
         icon_canvas.pack(side="left", padx=(10, 20))
@@ -237,7 +243,7 @@ class ModernResultsFrame(ttk_boot.Frame):
         # Analytics Section
         analytics_header = ttk_boot.Label(
             self.content_frame,
-            text="📊  Threat Analytics",
+            text="📊 Threat Analytics",
             font=("Segoe UI", 16, "bold"),
             bootstyle="light",
         )
@@ -245,12 +251,11 @@ class ModernResultsFrame(ttk_boot.Frame):
 
         analytics_container = ttk_boot.Frame(self.content_frame)
         analytics_container.pack(fill="both", expand=True, padx=10, pady=(0, 25))
-        
 
         # Left: Pie Chart
         chart_frame = ttk_boot.Labelframe(
             analytics_container,
-            text="  Severity Distribution  ",
+            text=" Severity Distribution ",
             bootstyle="primary",
             padding=20
         )
@@ -277,11 +282,18 @@ class ModernResultsFrame(ttk_boot.Frame):
 
         counter_grid.grid_columnconfigure(0, weight=1)
         counter_grid.grid_columnconfigure(1, weight=1)
-
+        
+        # --- Recommendation Section ---
+        self._create_recommendation_section(
+            self.content_frame,
+            mode=mode,
+            is_vulnerable=is_vulnerable,
+        )
+        
         # Best Payload Section
         payload_header = ttk_boot.Label(
             self.content_frame,
-            text="⚡  Highest Fitness Payload",
+            text="⚡ Highest Fitness Payload",
             font=("Segoe UI", 16, "bold"),
             bootstyle="light",
         )
@@ -289,7 +301,7 @@ class ModernResultsFrame(ttk_boot.Frame):
 
         payload_container = ttk_boot.Labelframe(
             self.content_frame,
-            text=f"  Fitness Score: {float(best_row.get('Fitness', 0)):.4f}  ",
+            text=f" Fitness Score: {float(best_row.get('Fitness', 0)):.4f} ",
             bootstyle="success",
             padding=20,
         )
@@ -320,6 +332,7 @@ class ModernResultsFrame(ttk_boot.Frame):
         payload_text.pack(fill="both", expand=True, padx=2, pady=2)
         payload_text.insert("1.0", best_row.get("Payload", "N/A"))
         payload_text.config(state="disabled")
+
         payload_frame.pack(fill="both", expand=True, pady=(0, 15))
 
         # Additional info for SQLi
@@ -332,11 +345,10 @@ class ModernResultsFrame(ttk_boot.Frame):
 
             ttk_boot.Label(
                 info_container,
-                text=f"📌 Parameter:  ",
+                text=f"📌 Parameter: ",
                 font=("Segoe UI", 10, "bold"),
                 bootstyle="secondary",
             ).pack(side="left")
-
             ttk_boot.Label(
                 info_container,
                 text=param_name,
@@ -346,11 +358,10 @@ class ModernResultsFrame(ttk_boot.Frame):
 
             ttk_boot.Label(
                 info_container,
-                text=f"🔧 Method:  ",
+                text=f"🔧 Method: ",
                 font=("Segoe UI", 10, "bold"),
                 bootstyle="secondary",
             ).pack(side="left")
-
             ttk_boot.Label(
                 info_container,
                 text=method,
@@ -489,6 +500,86 @@ class ModernResultsFrame(ttk_boot.Frame):
         ).pack(anchor="w", pady=(2, 0))
 
         return card
+    
+    def _create_recommendation_section(self, parent, mode, is_vulnerable):
+        """
+        Display simple remediation recommendations based on scan type and status.
+        mode: "xss", "sqli", "both"
+        is_vulnerable: bool
+        """
+        # Header
+        rec_header = ttk_boot.Label(
+            parent,
+            text="🛡 Remediation Recommendations",
+            font=("Segoe UI", 16, "bold"),
+            bootstyle="light",
+        )
+        rec_header.pack(anchor="w", padx=10, pady=(10, 8))
+
+        # Card container with subtle border
+        rec_container = ttk_boot.Labelframe(
+            parent,
+            text=" Suggested Actions ",
+            bootstyle="info",
+            padding=12,
+        )
+        rec_container.pack(fill="both", expand=True, padx=10, pady=(0, 20))
+
+        # Inner frame with darker background for contrast
+        inner = ttk_boot.Frame(rec_container, bootstyle="dark")
+        inner.pack(fill="both", expand=True)
+
+        text_widget = tk.Text(
+            inner,
+            wrap="word",
+            height=7,
+            font=("Segoe UI", 10),
+            bg="#1f232a",
+            fg="#f8f9fa",
+            relief="flat",
+            padx=10,
+            pady=10,
+        )
+        text_widget.pack(fill="both", expand=True)
+
+        if not is_vulnerable:
+            msg = (
+                "Tidak ditemukan indikasi kerentanan pada parameter yang diuji "
+                "berdasarkan skenario pengujian yang digunakan.\n\n"
+                "Rekomendasi umum:\n"
+                "• Tetap lakukan validasi dan sanitasi input secara konsisten.\n"
+                "• Pastikan framework atau library yang digunakan selalu diperbarui.\n"
+                "• Lakukan pengujian berkala dengan konfigurasi dan permukaan serangan yang lebih luas."
+            )
+            text_widget.insert("1.0", msg)
+            text_widget.config(state="disabled")
+            return
+
+        mode_l = mode.lower()
+        lines = []
+
+        if mode_l in ("xss", "both"):
+            lines.append(
+                "• Kerentanan Reflected XSS terdeteksi pada permukaan input yang diuji.\n"
+                "  - Terapkan validasi dan sanitasi input pada sisi server (whitelist karakter dan pola yang diperbolehkan).\n"
+                "  - Gunakan output encoding yang sesuai konteks (HTML, JavaScript, atribut, URL encoding).\n"
+                "  - Untuk aplikasi PHP, gunakan fungsi seperti htmlspecialchars() atau htmlentities() pada setiap output yang berasal dari input pengguna.\n"
+                "  - Pertimbangkan penerapan Content Security Policy (CSP) untuk membatasi eksekusi skrip tidak tepercaya.\n"
+                "  - Referensi mitigasi XSS: OWASP XSS Prevention Cheat Sheet (https://owasp.org/www-project-cheat-sheets/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.html) dan CWE-79 (https://cwe.mitre.org/data/definitions/79.html).\n"
+            )
+
+        if mode_l in ("sqli", "both"):
+            lines.append(
+                "• Kerentanan SQL Injection terdeteksi pada permukaan input yang diuji.\n"
+                "  - Selalu gunakan prepared statement atau parameterized query pada akses basis data.\n"
+                "  - Hindari penyusunan query dengan cara menggabungkan string langsung dari input pengguna.\n"
+                "  - Terapkan validasi input berbasis tipe dan pola (misalnya hanya menerima angka untuk ID).\n"
+                "  - Batasi hak akses akun database (principle of least privilege) dan nonaktifkan pesan error SQL yang terlalu detail di lingkungan produksi.\n"
+                "  - Referensi mitigasi SQL Injection: OWASP SQL Injection Prevention Cheat Sheet (https://owasp.org/www-project-cheat-sheets/cheatsheets/SQL_Injection_Prevention_Cheat_Sheet.html) dan CWE-89 (https://cwe.mitre.org/data/definitions/89.html).\n"
+            )
+
+        text_widget.insert("1.0", "\n".join(lines))
+        text_widget.config(state="disabled")
 
 
 class GAXSS_GUI(ttk_boot.Window):
@@ -707,9 +798,9 @@ class GAXSS_GUI(ttk_boot.Window):
         ga_grid.pack(fill="x")
 
         # FIXED: Create instance variables FIRST
-        self.pop_var = tk.StringVar(value="20")
-        self.gen_var = tk.StringVar(value="20")
-        self.patience_var = tk.StringVar(value="5")
+        self.pop_var = tk.StringVar(value="60")
+        self.gen_var = tk.StringVar(value="30")
+        self.patience_var = tk.StringVar(value="10")
 
         # Then use them in list
         ga_params = [

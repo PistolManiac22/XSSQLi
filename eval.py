@@ -1,6 +1,5 @@
 # evaluate_gaxss_results.py
-# Script untuk menghitung Confusion Matrix & Classification Report
-# dari hasil XSS dan SQLi (CSV) yang dihasilkan alat GAXSS-mu.
+# Versi otomatis: olah semua file XSS dan SQLi di folder results/
 
 import os
 import glob
@@ -37,14 +36,14 @@ def load_labels_from_csv(pattern):
         with open(path, newline="", encoding="utf-8") as f:
             reader = csv.DictReader(f)
             for row in reader:
-                gt = row.get("GroundTruth", "").strip().upper()
-                pred = row.get("Predicted", "").strip().upper()
+                gt = (row.get("GroundTruth") or "").strip().upper()
+                pred = (row.get("Predicted") or "").strip().upper()
 
                 # Skip baris kosong / tidak lengkap
                 if not gt or not pred:
                     continue
 
-                # Optional: hanya terima label yang kita kenal
+                # Hanya terima label yang kita kenal
                 if gt not in {"VULNERABLE", "SAFE"}:
                     continue
                 if pred not in {"VULNERABLE", "SAFE"}:
@@ -88,9 +87,9 @@ def print_metrics(title, y_true, y_pred):
 
     # Metrik global
     acc = accuracy_score(y_true, y_pred)
-    prec = precision_score(y_true, y_pred, pos_label="VULNERABLE")
-    rec = recall_score(y_true, y_pred, pos_label="VULNERABLE")
-    f1 = f1_score(y_true, y_pred, pos_label="VULNERABLE")
+    prec = precision_score(y_true, y_pred, pos_label="VULNERABLE", zero_division=0)
+    rec = recall_score(y_true, y_pred, pos_label="VULNERABLE", zero_division=0)
+    f1 = f1_score(y_true, y_pred, pos_label="VULNERABLE", zero_division=0)
 
     print("Metrik Global (positif = VULNERABLE):")
     print(f"  Accuracy : {acc:.4f}")
@@ -108,6 +107,7 @@ def print_metrics(title, y_true, y_pred):
             labels=labels,
             target_names=labels,
             digits=4,
+            zero_division=0,
         )
     )
 
@@ -116,24 +116,25 @@ def main():
     """
     Asumsi struktur folder:
       - results/
-          xssresultsYYYYMMDDHHMMSS.csv
-          sqliresultsYYYYMMDDHHMMSS.csv
-
-    Ini mengikuti nama file default di main_gaxss.py.
+          dvwa_xss_low.csv
+          dvwa_xss_medium.csv
+          ...
+          bwapp_sqli_medium.csv
+          mutillidae_sqli_high.csv
     """
     base_results_dir = "results"
 
-    # --- Evaluasi XSS ---
-    xss_pattern = os.path.join(base_results_dir, "xss_results_20251223_230732.csv")
+    # --- Evaluasi XSS: semua file yang mengandung 'xss_' ---
+    xss_pattern = os.path.join(base_results_dir, "*XSS_*.csv")
     y_true_xss, y_pred_xss = load_labels_from_csv(xss_pattern)
-    print_metrics("HASIL EVALUASI XSS", y_true_xss, y_pred_xss)
+    print_metrics("HASIL EVALUASI XSS (SEMUA TEST CASE)", y_true_xss, y_pred_xss)
 
-    # --- Evaluasi SQLi ---
-    sqli_pattern = os.path.join(base_results_dir, "sqli_results_20251223_230850.csv")
+    # --- Evaluasi SQLi: semua file yang mengandung 'sqli_' ---
+    sqli_pattern = os.path.join(base_results_dir, "*SQLi_*.csv")
     y_true_sqli, y_pred_sqli = load_labels_from_csv(sqli_pattern)
-    print_metrics("HASIL EVALUASI SQL INJECTION", y_true_sqli, y_pred_sqli)
+    print_metrics("HASIL EVALUASI SQL INJECTION (SEMUA TEST CASE)", y_true_sqli, y_pred_sqli)
 
-    # --- (Opsional) gabungan semua ---
+    # --- Gabungan semua ---
     if y_true_xss and y_true_sqli:
         y_true_all = y_true_xss + y_true_sqli
         y_pred_all = y_pred_xss + y_pred_sqli
